@@ -1,10 +1,9 @@
-name: MAD Daily Selector
+name: MAD_DAILY_SELECTOR
 
 on:
   schedule:
-    # 台灣時間每週五晚上 20:00 執行 (對應 UTC 12:00)
-    - cron: '0 12 * * 5'
-  workflow_dispatch:      
+    - cron: '0 12 * * 5' # 每週五晚上 8 點
+  workflow_dispatch: # 手動執行按鈕
 
 jobs:
   run_selector:
@@ -13,25 +12,18 @@ jobs:
       - name: 1. 下載程式碼
         uses: actions/checkout@v4
 
-      - name: 2. [重要] 診斷檔案內容
-        run: |
-          echo "--- 正在確認 requirements.txt 內容 ---"
-          cat requirements.txt
-          echo "--- 確認完畢 ---"
+      - name: 2. 設定 Python 環境
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
 
-      - name: 3. 強制安裝套件並執行
+      - name: 3. 執行策略並發送通知
         env:
-          FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
-        run: |
-          python -m pip install --upgrade pip
-          pip install FinMind pandas numpy tqdm requests
-          python selector.py
-      - name: 執行策略並發送 Telegram
-        env:
+          # 這裡必須確保三個 Secrets 都傳進來
           FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-        
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
+          # 合併成一個指令，安裝完立刻執行
           pip install FinMind pandas numpy tqdm requests
           python selector.py
