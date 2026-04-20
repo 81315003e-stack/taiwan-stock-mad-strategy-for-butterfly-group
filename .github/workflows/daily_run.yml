@@ -2,29 +2,34 @@ name: MAD Daily Selector
 
 on:
   schedule:
-    # 這是 cron 表示法，設定為台灣時間週一至週五下午 5:00 執行
     - cron: '0 9 * * 1-5' 
-  workflow_dispatch:      # 讓你可以手動點擊按鈕立即執行
+  workflow_dispatch:      
 
 jobs:
   run_selector:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.9'
+          python-version: '3.10'
+          cache: 'pip' # 開啟快取功能，加速安裝並減少失敗率
 
-      - name: Install Dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install FinMind pandas numpy tqdm requests
-
-      - name: Execute Strategy
+      - name: Force Install and Run
         env:
-          # 這邊會去抓我們等一下要在 Settings 設定的密碼
           FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
-        run: python selector.py
+        run: |
+          # 1. 確保 pip 是最新版
+          python -m pip install --upgrade pip
+          
+          # 2. 強制安裝所有必要的套件 (包含那個一直失蹤的 tqdm)
+          pip install FinMind pandas numpy tqdm requests
+          
+          # 3. 檢查一下到底裝進去沒 (這會在 Log 顯示清單)
+          pip list
+          
+          # 4. 執行主程式
+          python selector.py
