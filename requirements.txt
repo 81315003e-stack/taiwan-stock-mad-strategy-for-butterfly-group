@@ -1,0 +1,3 @@
+FinMind
+pandas
+numpy
