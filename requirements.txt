@@ -1,3 +1,4 @@
 FinMind
 pandas
 numpy
+tqdm
