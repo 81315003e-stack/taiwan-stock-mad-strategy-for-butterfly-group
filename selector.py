@@ -3,10 +3,11 @@ import datetime
 import time
 import requests
 import pandas as pd
+import numpy as np
 from FinMind.data import DataLoader
 import sys
 
-# 強制讓 print 立即顯示在 Log 中
+# 強制 print 立即輸出到 Log
 def print_log(msg):
     print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] {msg}")
     sys.stdout.flush()
@@ -15,61 +16,103 @@ def send_telegram_msg(message):
     token = os.getenv('TELEGRAM_BOT_TOKEN')
     chat_id = os.getenv('TELEGRAM_CHAT_ID')
     if not token or not chat_id:
-        print_log("❌ 錯誤：找不到 Telegram Token 或 Chat ID 變數！")
+        print_log("❌ 錯誤：找不到 Telegram Token 或 Chat ID")
         return
     url = f"https://api.telegram.org/bot{token}/sendMessage"
-    res = requests.post(url, data={"chat_id": chat_id, "text": message, "parse_mode": "Markdown"})
-    if res.status_code == 200:
-        print_log("✅ Telegram 訊息已成功送出！")
-    else:
-        print_log(f"❌ Telegram 發送失敗：{res.text}")
+    payload = {"chat_id": chat_id, "text": message, "parse_mode": "Markdown"}
+    try:
+        res = requests.post(url, data=payload)
+        if res.status_code == 200:
+            print_log("✅ Telegram 訊息已成功送出！")
+        else:
+            print_log(f"❌ Telegram 發送失敗：{res.text}")
+    except Exception as e:
+        print_log(f"❌ 發送時發生異常：{e}")
 
 def run_mad_strategy():
-    print_log("🚀 診斷啟動：程式開始執行...")
+    print_log("🚀 MAD 選股策略開始執行...")
     
+    # FinMind 會自動讀取環境變數，不需要手動 login
     dl = DataLoader()
-    token = os.getenv('FINMIND_TOKEN')
-    if token:
-        dl.login(api_token=token)
-        print_log("🔑 FinMind Token 登入設定完成")
     
-    # 1. 測試 API 存取
-    print_log("📡 正在嘗試抓取全市場快照 (這一步最容易卡住)...")
+    # 1. 獲取市場快照，找出「活躍股」
     try:
         market_all = dl.taiwan_stock_daily_last()
         if market_all.empty:
-            print_log("⚠️ 警告：全市場快照回傳空值，可能是 API 維護中")
-            send_telegram_msg("⚠️ 今日市場快照回傳空值，請檢查 FinMind 狀態")
-            return
-        print_log(f"✅ 成功抓取快照，共 {len(market_all)} 筆資料")
+            print_log("⚠️ 無法獲取快照，可能是 API 繁忙，嘗試改用基礎清單...")
+            stock_info = dl.taiwan_stock_info()
+            active_list = stock_info[stock_info['stock_id'].str.match(r'^\d{4}$')]['stock_id'].unique().tolist()[:300]
+        else:
+            # 篩選：成交量 > 500張 (500,000股)
+            active_df = market_all[
+                (market_all['volume'] >= 500000) & 
+                (market_all['stock_id'].str.match(r'^\d{4}$'))
+            ]
+            active_list = active_df['stock_id'].unique().tolist()
+            print_log(f"✅ 成功獲取快照，篩選出 {len(active_list)} 檔活躍股")
     except Exception as e:
-        print_log(f"❌ API 報錯：{str(e)}")
-        send_telegram_msg(f"❌ API 執行錯誤：{str(e)}")
+        print_log(f"❌ 獲取基礎資料失敗: {e}")
         return
 
-    # 2. 篩選活跃股
-    active_df = market_all[
-        (market_all['volume'] >= 500000) & 
-        (market_all['stock_id'].str.match(r'^\d{4}$'))
+    # 2. 進行深度掃描 (限制在前 580 檔，避免 API 爆額度)
+    all_data = []
+    target_stocks = active_list[:580]
+    today = datetime.datetime.now().strftime('%Y-%m-%d')
+    start_date = (datetime.datetime.now() - datetime.timedelta(days=450)).strftime('%Y-%m-%d')
+
+    print_log(f"📡 正在深度掃描 {len(target_stocks)} 檔標的...")
+    for sid in target_stocks:
+        try:
+            df = dl.taiwan_stock_daily(stock_id=sid, start_date=start_date, end_date=today)
+            if not df.empty and len(df) >= 200:
+                all_data.append(df)
+        except:
+            continue
+        time.sleep(0.05)
+
+    if not all_data:
+        print_log("⚠️ 掃描結束，無符合長度之資料。")
+        send_telegram_msg("⚠️ 今日掃描結束，未發現符合資料。")
+        return
+
+    # 3. 指標計算與 F1-F3 篩選
+    full_df = pd.concat(all_data)
+    full_df['ma21'] = full_df.groupby('stock_id')['close'].transform(lambda x: x.rolling(21).mean())
+    full_df['ma200'] = full_df.groupby('stock_id')['close'].transform(lambda x: x.rolling(200).mean())
+    full_df['mrat'] = full_df['ma21'] / full_df['ma200']
+    
+    full_df['h20'] = full_df.groupby('stock_id')['max'].transform(lambda x: x.rolling(20).max())
+    full_df['l10'] = full_df.groupby('stock_id')['min'].transform(lambda x: x.rolling(10).min())
+    full_df['l11_20'] = full_df.groupby('stock_id')['min'].transform(lambda x: x.shift(10).rolling(10).min())
+    full_df['amp'] = full_df['max'] - full_df['min']
+    full_df['amp5_max'] = full_df.groupby('stock_id')['amp'].transform(lambda x: x.rolling(5).max())
+    full_df['amp6_15_max'] = full_df.groupby('stock_id')['amp'].transform(lambda x: x.shift(5).rolling(10).max())
+
+    latest_date = full_df['date'].max()
+    today_df = full_df[full_df['date'] == latest_date].copy()
+    
+    # 統計過濾
+    mrat_vals = today_df['mrat'].dropna()
+    mrat_p90 = mrat_vals.quantile(0.9)
+    mrat_std = mrat_vals.std()
+
+    final_picks = today_df[
+        (today_df['mrat'] > mrat_p90) & (today_df['mrat'] > (1 + mrat_std)) &
+        (today_df['close'] / today_df['h20'] > 0.88) &
+        (today_df['l10'] > today_df['l11_20']) &
+        (today_df['amp5_max'] < today_df['amp6_15_max'])
     ]
-    active_list = active_df['stock_id'].unique().tolist()
-    print_log(f"🔍 篩選出 {len(active_list)} 檔活躍股 (成交量 > 500張)")
 
-    if not active_list:
-        print_log("⚠️ 沒有符合成交量門檻的股票，停止執行")
-        return
+    # 4. 組裝訊息並發送
+    msg = f"*📊 MAD 選股報告 ({latest_date})*\n"
+    msg += f"掃描樣本：{len(target_stocks)} 檔活躍股\n---"
+    if not final_picks.empty:
+        msg += "\n```\n" + final_picks[['stock_id', 'close', 'mrat']].round(3).to_string(index=False) + "\n```"
+    else:
+        msg += "\n_目前無符合標的。_"
 
-    # 3. 測試發送
-    test_msg = f"📊 MAD 診斷報告\n---\n目前偵測到市場活躍股數：{len(active_list)} 檔\n資料日期：{market_all['date'].max()}\n系統運作正常，準備開始深度掃描..."
-    send_telegram_msg(test_msg)
+    send_telegram_msg(msg)
+    print_log(f"✅ 流程完成！選中 {len(final_picks)} 檔。")
 
-    # (這裡為了診斷先跑前 50 檔，確保能快速跑完看到結果)
-    print_log("🏗️ 準備進入深度掃描邏輯...")
-    # ... (此處可保留你之前的 MAD 計算邏輯) ...
-
-# --- 這是最重要的部分，沒這兩行程式就不會跑 ---
 if __name__ == "__main__":
-    try:
-        run_mad_strategy()
-    except Exception as fatal_e:
-        print_log(f"💥 程式發生致命錯誤：{str(fatal_e)}")
+    run_mad_strategy()
