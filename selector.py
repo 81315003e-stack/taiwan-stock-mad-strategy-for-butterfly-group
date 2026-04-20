@@ -6,60 +6,59 @@ import numpy as np
 from FinMind.data import DataLoader
 
 def run_mad_strategy():
+    # 1. 初始化 (FinMind 會自動讀取環境變數中的 FINMIND_TOKEN)
     token = os.getenv('FINMIND_TOKEN')
-    dl = DataLoader()
-    if token:
-        dl.login(api_token=token)
     
-    print(f"[{datetime.datetime.now()}] 系統啟動，準備執行 MAD 篩選...")
+    # 建立 DataLoader 時帶入 token 即可，不需要再呼叫 .login()
+    try:
+        dl = DataLoader(api_token=token)
+    except:
+        dl = DataLoader()
+    
+    print(f"[{datetime.datetime.now()}] 登入成功，開始準備選股程序...")
 
-    # 1. 獲取清單
+    # 2. 獲取股票清單
     stock_info = dl.taiwan_stock_info()
-    # 過濾出一般股票 (排除 ETF 等)
-    stock_list = stock_info[stock_info['type'] == 'twstock']['stock_id'].unique().tolist()
     
-    # 算 MA200 需要約 280 個交易日，我們抓 365 天最保險
+    # 診斷欄位名稱並過濾股票
+    cols = stock_info.columns.tolist()
+    if 'industry_category' in cols:
+        # 排除掉非股票類標的 (如 ETF)
+        filter_out = ['ETF', '受益證券', '存託憑證', '認購權證']
+        stock_list = stock_info[~stock_info['industry_category'].isin(filter_out)]['stock_id'].unique().tolist()
+    else:
+        stock_list = stock_info['stock_id'].unique().tolist()
+    
+    # 設定抓取一整年的資料以計算 MA200
     start_date = (datetime.datetime.now() - datetime.timedelta(days=400)).strftime('%Y-%m-%d')
     
     all_data = []
-    # --- 測試階段：先縮小到 20-30 檔，確保 API 額度夠用 ---
-    test_range = stock_list[:30] 
+    # 為了避免 API 流量爆掉，我們先抓 100 檔標的測試
+    test_range = stock_list[:100] 
 
-    print(f"📡 預計掃描 {len(test_range)} 檔標的，起始日期：{start_date}")
-
+    print(f"📡 正在抓取 {len(test_range)} 檔股票資料...")
     for sid in test_range:
         try:
-            # 抓取調整後股價
             df = dl.taiwan_stock_daily_adj(stock_id=sid, start_date=start_date)
-            
-            if not df.empty:
-                data_len = len(df)
-                if data_len > 200:
-                    all_data.append(df)
-                    print(f"✅ {sid} 抓取成功 (共 {data_len} 筆)")
-                else:
-                    print(f"⚠️ {sid} 資料長度不足 ({data_len} 筆)，跳過")
-            else:
-                print(f"❌ {sid} API 回傳空值")
-            
-            # 稍微停頓 0.5 秒，保護 API 不被鎖
-            time.sleep(0.5)
-            
-        except Exception as e:
-            print(f"❗ {sid} 發生錯誤: {str(e)}")
+            if not df.empty and len(df) > 200:
+                all_data.append(df)
+        except Exception:
             continue
+        # 稍微停頓避免 API 限制
+        time.sleep(0.2)
             
     if not all_data:
-        print("\n[!!!] 最終結果：沒有任何股票符合資料長度要求。")
+        print("❌ 沒抓到足夠數據，可能是今日 API 流量已達上限。")
         return
 
     full_df = pd.concat(all_data)
-    print(f"\n📊 數據整合完成，開始計算因子...")
 
-    # --- 後續計算邏輯不變 ---
+    # 3. 計算 MAD 因子
     full_df['ma21'] = full_df.groupby('stock_id')['close'].transform(lambda x: x.rolling(21).mean())
     full_df['ma200'] = full_df.groupby('stock_id')['close'].transform(lambda x: x.rolling(200).mean())
     full_df['mrat'] = full_df['ma21'] / full_df['ma200']
+
+    # F1-F3 準備
     full_df['h20'] = full_df.groupby('stock_id')['max'].transform(lambda x: x.rolling(20).max())
     full_df['l10'] = full_df.groupby('stock_id')['min'].transform(lambda x: x.rolling(10).min())
     full_df['l11_20'] = full_df.groupby('stock_id')['min'].transform(lambda x: x.shift(10).rolling(10).min())
@@ -67,6 +66,7 @@ def run_mad_strategy():
     full_df['amp5_max'] = full_df.groupby('stock_id')['amp'].transform(lambda x: x.rolling(5).max())
     full_df['amp6_15_max'] = full_df.groupby('stock_id')['amp'].transform(lambda x: x.shift(5).rolling(10).max())
 
+    # 4. 篩選最新日期的橫截面數據
     latest_date = full_df['date'].max()
     today_df = full_df[full_df['date'] == latest_date].copy()
     
@@ -74,8 +74,9 @@ def run_mad_strategy():
     if len(mrat_values) > 0:
         q90 = mrat_values.quantile(0.9)
         std_val = mrat_values.std()
-        today_df['pass_mrat'] = (today_df['mrat'] > q90) & (today_df['mrat'] > (1 + std_val))
         
+        # 核心策略條件篩選
+        today_df['pass_mrat'] = (today_df['mrat'] > q90) & (today_df['mrat'] > (1 + std_val))
         today_df['f1_pass'] = (today_df['close'] / today_df['h20']) > 0.88
         today_df['f2_pass'] = today_df['l10'] > today_df['l11_20']
         today_df['f3_pass'] = today_df['amp5_max'] < today_df['amp6_15_max']
@@ -85,13 +86,13 @@ def run_mad_strategy():
             (today_df['f2_pass']) & (today_df['f3_pass'])
         ]
 
-        print(f"\n🎯 --- {latest_date} MAD 選股名單 ---")
+        print(f"\n🎯 --- {latest_date} MAD 策略選股名單 ---")
         if final_picks.empty:
-            print("目前這 30 檔中無符合條件標的。")
+            print("目前樣本中無符合所有條件的強勢標的。")
         else:
             print(final_picks[['stock_id', 'close', 'mrat']].to_string(index=False))
     else:
-        print("❌ MRAT 計算失敗，請檢查資料時間跨度。")
+        print("❌ 無法計算橫截面指標，請確認資料跨度是否足夠。")
 
 if __name__ == "__main__":
     run_mad_strategy()
