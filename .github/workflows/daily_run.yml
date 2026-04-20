@@ -2,7 +2,8 @@ name: MAD Daily Selector
 
 on:
   schedule:
-    - cron: '0 9 * * 1-5' 
+    # 台灣時間每週五晚上 20:00 執行 (對應 UTC 12:00)
+    - cron: '0 12 * * 5'
   workflow_dispatch:      
 
 jobs:
