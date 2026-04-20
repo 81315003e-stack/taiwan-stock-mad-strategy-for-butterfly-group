@@ -1,0 +1,25 @@
+name: MAD_V2_AUTO_PICKER
+
+on:
+  workflow_dispatch:      # 讓你可以手動按按鈕執行
+  schedule:
+    - cron: '0 9 * * 1-5' 
+
+jobs:
+  run_strategy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Step 1 - 下載代碼
+        uses: actions/checkout@v4
+
+      - name: Step 2 - 設定 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Step 3 - 暴力安裝並選股
+        env:
+          FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
+        run: |
+          pip install FinMind pandas numpy tqdm requests
+          python selector.py
