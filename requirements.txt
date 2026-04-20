@@ -2,4 +2,3 @@ FinMind
 pandas
 numpy
 tqdm
-requests
