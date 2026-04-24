@@ -31,7 +31,12 @@ def run_batched_strategy():
     
     print_log(f"🚀 MAD 分批掃描啟動：範圍 {start_idx} ~ {end_idx}")
     dl = DataLoader()
-    
+    token = os.getenv('FINMIND_TOKEN') # 抓取環境變數裡的 Token
+    if token:
+        dl.login(token=token)
+        print_log("🔑 已成功使用 API Token 登入")
+    else:
+        print_log("⚠️ 未偵測到 Token，目前以訪客身份執行（限制較多）")
     # 1. 獲取全市場清單
     try:
         stock_info = dl.taiwan_stock_info()
