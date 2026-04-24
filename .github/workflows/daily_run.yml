@@ -1,9 +1,13 @@
-name: MAD_DAILY_SELECTOR
+name: MAD_FULL_MARKET_SCAN
 
 on:
   schedule:
-    - cron: '0 12 * * 5' # 每週五晚上 8 點
-  workflow_dispatch: # 手動執行按鈕
+    # 台灣時間週五晚上 20:00, 21:00, 22:00, 23:00 分批執行
+    - cron: '0 12 * * 5' # 20:00 (0-500)
+    - cron: '0 13 * * 5' # 21:00 (500-1000)
+    - cron: '0 14 * * 5' # 22:00 (1000-1500)
+    - cron: '0 15 * * 5' # 23:00 (1500-2000)
+  workflow_dispatch:
 
 jobs:
   run_selector:
@@ -12,18 +16,26 @@ jobs:
       - name: 1. 下載程式碼
         uses: actions/checkout@v4
 
-      - name: 2. 設定 Python 環境
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.10'
+      - name: 2. 設定分段參數
+        id: set_slice
+        run: |
+          # 根據執行時間自動判定現在要跑哪一段
+          HOUR=$(date +%H)
+          if [ "$HOUR" == "12" ]; then echo "START=0"; echo "END=500"; fi
+          if [ "$HOUR" == "13" ]; then echo "START=500"; echo "END=1000"; fi
+          if [ "$HOUR" == "14" ]; then echo "START=1000"; echo "END=1500"; fi
+          if [ "$HOUR" == "15" ]; then echo "START=1500"; echo "END=2100"; fi
+          # 如果是手動執行(workflow_dispatch)，預設跑全市場(這會爆API，建議手動時還是設500)
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then echo "START=0"; echo "END=500"; fi
 
       - name: 3. 執行策略並發送通知
         env:
-          # 這裡必須確保三個 Secrets 都傳進來
           FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          # 將判定好的分段傳入 Python
+          SLICE_START: ${{ steps.set_slice.outputs.START }}
+          SLICE_END: ${{ steps.set_slice.outputs.END }}
         run: |
-          # 合併成一個指令，安裝完立刻執行
           pip install FinMind pandas numpy tqdm requests
           python selector.py
