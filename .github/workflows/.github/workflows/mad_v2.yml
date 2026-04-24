@@ -3,10 +3,10 @@ name: MAD_FULL_MARKET_SCAN
 on:
   schedule:
     # 台灣時間週五晚上 20:00, 21:00, 22:00, 23:00 分批執行
-    - cron: '0 12 * * 5' # 20:00 (0-500)
-    - cron: '0 13 * * 5' # 21:00 (500-1000)
-    - cron: '0 14 * * 5' # 22:00 (1000-1500)
-    - cron: '0 15 * * 5' # 23:00 (1500-2000)
+    - cron: '0 12 * * 5' # 20:00 (UTC 12:00)
+    - cron: '0 13 * * 5' # 21:00 (UTC 13:00)
+    - cron: '0 14 * * 5' # 22:00 (UTC 14:00)
+    - cron: '0 15 * * 5' # 23:00 (UTC 15:00)
   workflow_dispatch:
 
 jobs:
@@ -19,23 +19,39 @@ jobs:
       - name: 2. 設定分段參數
         id: set_slice
         run: |
-          # 根據執行時間自動判定現在要跑哪一段
+          # 獲取目前的 UTC 小時
           HOUR=$(date +%H)
-          if [ "$HOUR" == "12" ]; then echo "START=0"; echo "END=500"; fi
-          if [ "$HOUR" == "13" ]; then echo "START=500"; echo "END=1000"; fi
-          if [ "$HOUR" == "14" ]; then echo "START=1000"; echo "END=1500"; fi
-          if [ "$HOUR" == "15" ]; then echo "START=1500"; echo "END=2100"; fi
-          # 如果是手動執行(workflow_dispatch)，預設跑全市場(這會爆API，建議手動時還是設500)
-          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then echo "START=0"; echo "END=500"; fi
+          echo "當前 UTC 小時為: $HOUR"
+
+          # 預設值為 0-500，避免手動執行或小時沒對上時出錯
+          START=0
+          END=500
+
+          if [ "$HOUR" == "12" ]; then START=0; END=500; fi
+          if [ "$HOUR" == "13" ]; then START=500; END=1000; fi
+          if [ "$HOUR" == "14" ]; then START=1000; END=1500; fi
+          if [ "$HOUR" == "15" ]; then START=1500; END=2100; fi
+          
+          # 如果是手動執行，強制設定跑第一段 (0-500)
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            START=0
+            END=500
+          fi
+
+          # 【關鍵修正】必須寫入 $GITHUB_OUTPUT 才能傳給下一個步驟
+          echo "START=$START" >> $GITHUB_OUTPUT
+          echo "END=$END" >> $GITHUB_OUTPUT
+          echo "✅ 分段設定完成：$START 到 $END"
 
       - name: 3. 執行策略並發送通知
         env:
           FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          # 將判定好的分段傳入 Python
+          # 這裡現在能正確接到值了
           SLICE_START: ${{ steps.set_slice.outputs.START }}
           SLICE_END: ${{ steps.set_slice.outputs.END }}
         run: |
+          python -m pip install --upgrade pip
           pip install FinMind pandas numpy tqdm requests
           python selector.py
