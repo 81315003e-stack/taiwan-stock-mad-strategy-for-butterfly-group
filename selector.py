@@ -20,9 +20,14 @@ def send_telegram_msg(message):
     requests.post(url, data=payload)
 
 def run_batched_strategy():
-    # --- 0. 讀取分段參數 ---
-    start_idx = int(os.getenv('SLICE_START', 0))
-    end_idx = int(os.getenv('SLICE_END', 500))
+    # --- 0. 讀取分段參數 (修正後的防呆版本) ---
+    # 先抓出原始字串
+    raw_start = os.getenv('SLICE_START')
+    raw_end = os.getenv('SLICE_END')
+    
+    # 這裡的邏輯是：如果有抓到東西且不是空格，就轉成數字；否則給預設值 0 或 500
+    start_idx = int(raw_start) if raw_start and raw_start.strip() else 0
+    end_idx = int(raw_end) if raw_end and raw_end.strip() else 500
     
     print_log(f"🚀 MAD 分批掃描啟動：範圍 {start_idx} ~ {end_idx}")
     dl = DataLoader()
