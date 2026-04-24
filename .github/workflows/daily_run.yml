@@ -19,15 +19,23 @@ jobs:
       - name: 2. 設定分段參數
         id: set_slice
         run: |
-          # 根據執行時間自動判定現在要跑哪一段
           HOUR=$(date +%H)
-          if [ "$HOUR" == "12" ]; then echo "START=0"; echo "END=500"; fi
-          if [ "$HOUR" == "13" ]; then echo "START=500"; echo "END=1000"; fi
-          if [ "$HOUR" == "14" ]; then echo "START=1000"; echo "END=1500"; fi
-          if [ "$HOUR" == "15" ]; then echo "START=1500"; echo "END=2100"; fi
-          # 如果是手動執行(workflow_dispatch)，預設跑全市場(這會爆API，建議手動時還是設500)
-          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then echo "START=0"; echo "END=500"; fi
+          
+          # 預設值
+          START=0
+          END=500
 
+          # 只要符合小時，不論手動還是自動都判定範圍
+          if [ "$HOUR" == "12" ]; then START=0; END=500; fi
+          if [ "$HOUR" == "13" ]; then START=500; END=1000; fi
+          if [ "$HOUR" == "14" ]; then START=1000; END=1500; fi
+          if [ "$HOUR" == "15" ]; then START=1500; END=2100; fi
+          
+          # 把寫入 $GITHUB_OUTPUT 放在最後，確保數值被傳出去
+          echo "START=$START" >> $GITHUB_OUTPUT
+          echo "END=$END" >> $GITHUB_OUTPUT
+          echo "✅ 最終判定範圍：$START 到 $END"
+          
       - name: 3. 執行策略並發送通知
         env:
           FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
