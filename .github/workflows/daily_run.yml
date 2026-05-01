@@ -19,22 +19,31 @@ jobs:
       - name: 2. 設定分段參數
         id: set_slice
         run: |
+          # 取得手動輸入值
+          MANUAL_START="${{ github.event.inputs.manual_start }}"
+          MANUAL_END="${{ github.event.inputs.manual_end }}"
+          
+          # 取得台北小時
           HOUR=$(TZ='Asia/Taipei' date +%H)
-          
-          # 預設值
-          START=0
-          END=500
 
-          # 只要符合小時，不論手動還是自動都判定範圍
-          if [ "$HOUR" == "12" ]; then START=0; END=500; fi
-          if [ "$HOUR" == "13" ]; then START=500; END=1000; fi
-          if [ "$HOUR" == "14" ]; then START=1000; END=1500; fi
-          if [ "$HOUR" == "15" ]; then START=1500; END=2100; fi
+          if [ -n "$MANUAL_START" ] && [ -n "$MANUAL_END" ]; then
+            # 優先權 1：如果有手動輸入，就用輸入的值
+            START=$MANUAL_START
+            END=$MANUAL_END
+            SOURCE="手動輸入"
+          else
+            # 優先權 2：沒手動輸入，則依照時間自動判定
+            SOURCE="自動時鐘 ($HOUR 點)"
+            START=0
+            END=500
+            if [ "$HOUR" == "13" ]; then START=500; END=1000; fi
+            if [ "$HOUR" == "14" ]; then START=1000; END=1500; fi
+            if [ "$HOUR" == "15" ]; then START=1500; END=2100; fi
+          fi
           
-          # 把寫入 $GITHUB_OUTPUT 放在最後，確保數值被傳出去
           echo "START=$START" >> $GITHUB_OUTPUT
           echo "END=$END" >> $GITHUB_OUTPUT
-          echo "✅ 最終判定範圍：$START 到 $END"
+          echo "✅ 最終判定範圍：$START 到 $END (來源：$SOURCE)"
           
       - name: 3. 執行策略並發送通知
         env:
