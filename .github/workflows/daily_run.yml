@@ -19,7 +19,7 @@ jobs:
       - name: 2. 設定分段參數
         id: set_slice
         run: |
-          HOUR=$(date +%H)
+          HOUR=$(TZ='Asia/Taipei' date +%H)
           
           # 預設值
           START=0
