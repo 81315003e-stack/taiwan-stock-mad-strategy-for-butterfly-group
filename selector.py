@@ -13,7 +13,8 @@ def print_log(msg):
 def send_telegram_msg(message):
     token = os.getenv('TELEGRAM_BOT_TOKEN')
     chat_id = os.getenv('TELEGRAM_CHAT_ID')
-    if not token or not chat_id: return
+    if not token or not chat_id:
+        return
     url = f"https://api.telegram.org/bot{token}/sendMessage"
     payload = {"chat_id": chat_id, "text": message, "parse_mode": "Markdown"}
     try:
@@ -31,7 +32,6 @@ def run_batched_strategy():
 
     dl = DataLoader()
 
-    # 1. 股票清單
     try:
         stock_info = dl.taiwan_stock_info()
         full_list = stock_info[stock_info['stock_id'].str.match(r'^\d{4}$')]['stock_id'].unique().tolist()
@@ -47,15 +47,17 @@ def run_batched_strategy():
 
     all_price_data = []
 
-    # === 階段 1：技術面 MAD ===
+    # 階段 1：技術面
     print_log("📡 階段 1：技術面 MAD 篩選...")
     for sid in target_stocks:
         try:
             df = dl.taiwan_stock_daily(stock_id=sid, start_date=price_start, end_date=today)
-            if df.empty or len(df) < 200: continue
+            if df.empty or len(df) < 200:
+                continue
 
             vol_col = next((c for c in df.columns if c.lower() in ['trading_volume', 'volume']), None)
-            if not vol_col or df.iloc[-1][vol_col] < 500_000: continue
+            if not vol_col or df.iloc[-1][vol_col] < 500000:
+                continue
 
             df['ma21'] = df['close'].rolling(21).mean()
             df['ma200'] = df['close'].rolling(200).mean()
@@ -74,38 +76,42 @@ def run_batched_strategy():
         print_log("⚠️ 無動能標的")
         return
 
-    # === 階段 2：TTM EPS + ROE ===
+    # 階段 2：TTM EPS + ROE
     print_log(f"📡 階段 2：TTM EPS + ROE 檢查 ({len(all_price_data)} 檔)...")
     final_data_list = []
-    stats = {"total":0, "enough":0, "pass":0}
+    stats = {"enough": 0, "pass": 0}
 
     for df in all_price_data:
         sid = df['stock_id'].iloc[0]
         try:
             fin_df = dl.taiwan_stock_financial_statement(stock_id=sid, start_date=fin_start)
-            if fin_df.empty: continue
+            if fin_df.empty:
+                continue
 
+            # EPS
             eps_df = fin_df[fin_df['type'] == 'EPS'].copy()
             eps_df['value'] = pd.to_numeric(eps_df['value'], errors='coerce')
             eps_values = eps_df['value'].dropna().values
 
-            if len(eps_values) < 8: continue
+            if len(eps_values) < 8:
+                continue
             stats["enough"] += 1
 
             current_ttm = eps_values[-4:].sum()
-            prev_ttm = eps_values[-8:-4].sum()
+            prev_ttm = eps_values[-8:-4].sum() if len(eps_values) >= 8 else 0
 
-            if current_ttm <= 0: continue
+            if current_ttm <= 0:
+                continue
 
             ttm_growth = (current_ttm - prev_ttm) / prev_ttm if prev_ttm > 0 else 0.0
 
-            # ROE 篩選（取最新季 ROE）
+            # ROE
             roe_df = fin_df[fin_df['type'] == 'ROE'].copy()
             roe_df['value'] = pd.to_numeric(roe_df['value'], errors='coerce')
             latest_roe = roe_df['value'].dropna().iloc[-1] if not roe_df['value'].dropna().empty else 0
 
-            # === 提高門檻（可再調整）===
-            if (ttm_growth >= 0.15 or current_ttm >= 2.5) and latest_roe >= 12 and current_ttm > 1.0:
+            # 門檻設定（目前中高門檻）
+            if (ttm_growth >= 0.15 or current_ttm >= 2.5) and latest_roe >= 12 and current_ttm >= 1.0:
                 stats["pass"] += 1
                 df = df.copy()
                 df['ttm_eps'] = round(current_ttm, 3)
@@ -123,21 +129,15 @@ def run_batched_strategy():
         print_log("⚠️ 本批次無符合標的")
         return
 
-    # === 階段 3：完整技術指標 + 訊號 ===
+    # 階段 3：技術指標與訊號
     full_df = pd.concat(final_data_list, ignore_index=True)
     full_df.columns = [c.lower() for c in full_df.columns]
 
-    # 詳細技術指標（恢復你原本的邏輯）
     full_df['h20_max'] = full_df.groupby('stock_id')['max'].transform(lambda x: x.rolling(20).max())
-    full_df['l10_min'] = full_df.groupby('stock_id')['min'].transform(lambda x: x.rolling(10).min())
     full_df['daily_amp'] = full_df['max'] - full_df['min']
     full_df['amp5_max'] = full_df.groupby('stock_id')['daily_amp'].transform(lambda x: x.rolling(5).max())
 
     latest_date = full_df['date'].max()
     today_df = full_df[full_df['date'] == latest_date].copy()
 
-    today_df['ma21_dist'] = (today_df['close'] - today_df['ma21']) / today_df['ma21']
-
-    def get_signal(row):
-        if row['close'] >= row.get('h20_max', 0):
-            return "
+    today_df['ma21_dist'] = (today_df['close'] - today_df['ma21']) / today_df['ma
