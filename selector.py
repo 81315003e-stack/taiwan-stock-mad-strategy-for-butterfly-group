@@ -28,7 +28,7 @@ def run_batched_strategy():
     start_idx = int(raw_start) if raw_start and raw_start.strip() else 0
     end_idx = int(raw_end) if raw_end and raw_end.strip() else 200
 
-    print_log(f"🚀 MAD + 基本面 寬鬆版啟動：{start_idx} ~ {end_idx}")
+    print_log(f"🚀 MAD + 基本面 數值診斷版啟動：{start_idx} ~ {end_idx}")
 
     dl = DataLoader()
 
@@ -69,66 +69,57 @@ def run_batched_strategy():
         time.sleep(0.012)
 
     print_log(f"階段1 通過 {len(all_price_data)} 檔")
-    if not all_price_data:
-        return
 
-    # 階段 2：寬鬆基本面
-    print_log(f"📡 階段 2：基本面檢查 ({len(all_price_data)} 檔)...")
+    # 階段 2：印出所有數值
+    print_log(f"📡 階段 2：基本面檢查並印出數值 ({len(all_price_data)} 檔)...")
     final_data_list = []
-    stats = {"checked":0, "has_eps":0, "pass":0}
+    stats = {"checked":0, "has_eps":0}
 
     for df in all_price_data:
         sid = df['stock_id'].iloc[0]
         try:
             stats["checked"] += 1
             fin_df = dl.taiwan_stock_financial_statement(stock_id=sid, start_date=fin_start)
-            if fin_df.empty:
-                continue
+            if fin_df.empty: continue
 
-            # EPS
             eps_mask = fin_df['type'].astype(str).str.contains('EPS|盈餘|每股', case=False, na=False)
             eps_df = fin_df[eps_mask].copy()
 
-            if eps_df.empty:
-                continue
+            if eps_df.empty: continue
             stats["has_eps"] += 1
 
             eps_df['value'] = pd.to_numeric(eps_df['value'], errors='coerce')
             eps_values = eps_df['value'].dropna().values
 
-            if len(eps_values) < 4:
-                continue
+            if len(eps_values) < 4: continue
 
             current_ttm = round(eps_values[-4:].sum(), 3)
             prev_ttm = round(eps_values[-8:-4].sum(), 3) if len(eps_values) >= 8 else 0
             ttm_growth = (current_ttm - prev_ttm) / prev_ttm if prev_ttm > 0 else 0.0
 
-            # ROE
             roe_mask = fin_df['type'].astype(str).str.contains('ROE|權益報酬率', case=False, na=False)
             roe_df = fin_df[roe_mask].copy()
             roe_df['value'] = pd.to_numeric(roe_df['value'], errors='coerce')
             latest_roe = round(roe_df['value'].dropna().iloc[-1], 2) if not roe_df['value'].dropna().empty else 0
 
-            # === 極寬鬆門檻（先讓它有輸出）===
-            if current_ttm >= 0.5 and latest_roe >= 5:      # 可再調整
-                stats["pass"] += 1
+            print_log(f"[{sid}] TTM_EPS = {current_ttm} | 成長率 = {ttm_growth*100:6.1f}% | ROE = {latest_roe}%")
+
+            # 極寬鬆條件
+            if current_ttm >= 0.3 and latest_roe >= 3:
                 df = df.copy()
                 df['ttm_eps'] = current_ttm
                 df['ttm_growth'] = round(ttm_growth, 4)
                 df['roe'] = latest_roe
                 final_data_list.append(df)
 
-                # 印出通過股票的數值方便調整
-                print_log(f"✓ 通過 {sid} | TTM_EPS={current_ttm} | 成長={ttm_growth*100:.1f}% | ROE={latest_roe}%")
-
         except:
             continue
         time.sleep(0.07)
 
-    print_log(f"TTM統計 → 已檢查:{stats['checked']} | 有EPS:{stats['has_eps']} | 通過:{stats['pass']}")
+    print_log(f"統計 → 已檢查:{stats['checked']} | 有EPS:{stats['has_eps']} | 最終通過:{len(final_data_list)}")
 
     if not final_data_list:
-        print_log("⚠️ 仍無通過，請告訴我你想把 TTM_EPS 門檻降到多少（例如 0.3）")
+        print_log("⚠️ 還是沒有通過，請把上面的 [stock_id] TTM_EPS ... 那幾行貼給我")
         return
 
     # 報告
@@ -149,8 +140,8 @@ def run_batched_strategy():
 
     today_df['signal'] = today_df.apply(get_signal, axis=1)
 
-    msg = f"*📊 MAD + 基本面報告 ({latest_date})*\n"
-    msg += f"找到 {len(today_df)} 檔 | TTM_EPS≥0.5 + ROE≥5%\n---\n"
+    msg = f"*📊 MAD 基本面報告 ({latest_date})*\n"
+    msg += f"分段 {start_idx}~{end_idx} | 找到 {len(today_df)} 檔\n---\n"
     msg += "代號 價格 TTM_EPS 成長% ROE% 訊號\n"
 
     for _, row in today_df.sort_values('mrat', ascending=False).iterrows():
