@@ -28,7 +28,7 @@ def run_batched_strategy():
     start_idx = int(raw_start) if raw_start and raw_start.strip() else 0
     end_idx = int(raw_end) if raw_end and raw_end.strip() else 200
 
-    print_log(f"🚀 MAD + TTM EPS 診斷寬鬆版啟動：{start_idx} ~ {end_idx}")
+    print_log(f"🚀 MAD + TTM EPS 完整診斷版啟動：{start_idx} ~ {end_idx}")
 
     dl = DataLoader()
 
@@ -52,6 +52,7 @@ def run_batched_strategy():
         try:
             df = dl.taiwan_stock_daily(stock_id=sid, start_date=price_start, end_date=today)
             if df.empty or len(df) < 200: continue
+
             vol_col = next((c for c in df.columns if c.lower() in ['trading_volume', 'volume']), None)
             if not vol_col or df.iloc[-1][vol_col] < 500000: continue
 
@@ -68,26 +69,30 @@ def run_batched_strategy():
         time.sleep(0.012)
 
     print_log(f"階段1 通過 {len(all_price_data)} 檔")
-    if not all_price_data:
-        return
 
-    # 階段 2：寬鬆版 + 印出實際數值
-    print_log(f"📡 階段 2：TTM EPS 檢查 ({len(all_price_data)} 檔)...")
+    # 階段 2：強制印出所有數值
+    print_log(f"📡 階段 2：TTM EPS 詳細診斷 ({len(all_price_data)} 檔)...")
     final_data_list = []
 
     for df in all_price_data:
         sid = df['stock_id'].iloc[0]
         try:
             fin_df = dl.taiwan_stock_financial_statement(stock_id=sid, start_date=fin_start)
-            if fin_df.empty: continue
+            if fin_df.empty: 
+                print_log(f"[{sid}] 無財報資料")
+                continue
 
             eps_mask = fin_df['type'].astype(str).str.contains('EPS|盈餘|每股', case=False, na=False)
             eps_df = fin_df[eps_mask].copy()
-            if eps_df.empty: continue
+            if eps_df.empty: 
+                print_log(f"[{sid}] 無 EPS 資料")
+                continue
 
             eps_df['value'] = pd.to_numeric(eps_df['value'], errors='coerce')
             eps_values = eps_df['value'].dropna().values
-            if len(eps_values) < 4: continue
+            if len(eps_values) < 4: 
+                print_log(f"[{sid}] EPS 資料不足")
+                continue
 
             current_ttm = round(eps_values[-4:].sum(), 3)
             prev_ttm = round(eps_values[-8:-4].sum(), 3) if len(eps_values) >= 8 else 0
@@ -95,24 +100,25 @@ def run_batched_strategy():
 
             print_log(f"[{sid}] TTM_EPS = {current_ttm:.2f} | 成長率 = {ttm_growth*100:6.1f}%")
 
-            # 目前寬鬆門檻（先讓它有輸出）
-            if current_ttm >= 0.8 or ttm_growth >= 0.05:   # 可再調整
+            # 極寬鬆條件（先讓它有輸出）
+            if current_ttm >= 0.5 or ttm_growth >= -0.10:   # 允許小幅衰退
                 df = df.copy()
                 df['ttm_eps'] = current_ttm
                 df['ttm_growth'] = round(ttm_growth, 4)
                 final_data_list.append(df)
 
-        except:
+        except Exception as e:
+            print_log(f"[{sid}] 錯誤: {e}")
             continue
         time.sleep(0.07)
 
     print_log(f"最終通過 {len(final_data_list)} 檔")
 
     if not final_data_list:
-        print_log("⚠️ 仍無通過")
+        print_log("⚠️ 本批次仍無通過，請把上面的 [stock_id] TTM_EPS 數值貼給我")
         return
 
-    # 報告部分（含蓄勢待發）
+    # 後續報告（含蓄勢待發）
     full_df = pd.concat(final_data_list, ignore_index=True)
     full_df.columns = [c.lower() for c in full_df.columns]
 
