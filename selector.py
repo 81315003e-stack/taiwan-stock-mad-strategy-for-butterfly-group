@@ -28,7 +28,7 @@ def run_batched_strategy():
     start_idx = int(raw_start) if raw_start and raw_start.strip() else 0
     end_idx = int(raw_end) if raw_end and raw_end.strip() else 300
 
-    print_log(f"🚀 MAD + TTM EPS 最終實用版啟動：{start_idx} ~ {end_idx}")
+    print_log(f"🚀 MAD + TTM EPS 最終版啟動：{start_idx} ~ {end_idx}")
 
     dl = DataLoader()
 
@@ -73,7 +73,7 @@ def run_batched_strategy():
     if not all_price_data:
         return
 
-    # 階段 2：TTM EPS（適中門檻）
+    # 階段 2：TTM EPS（目前適中門檻）
     print_log(f"📡 階段 2：TTM EPS 檢查 ({len(all_price_data)} 檔)...")
     final_data_list = []
 
@@ -95,8 +95,8 @@ def run_batched_strategy():
             prev_ttm = round(eps_values[-8:-4].sum(), 3) if len(eps_values) >= 8 else 0
             ttm_growth = (current_ttm - prev_ttm) / prev_ttm if prev_ttm > 0 else 0.0
 
-            # 建議門檻（根據你這次的數據調整）
-            if current_ttm >= 1.2 or (current_ttm >= 0.6 and ttm_growth >= 0.10):
+            # 目前建議門檻
+            if current_ttm >= 1.2 or (current_ttm >= 0.8 and ttm_growth >= 0.10):
                 df = df.copy()
                 df['ttm_eps'] = current_ttm
                 df['ttm_growth'] = round(ttm_growth, 4)
@@ -107,7 +107,6 @@ def run_batched_strategy():
         time.sleep(0.07)
 
     print_log(f"基本面通過 {len(final_data_list)} 檔")
-
     if not final_data_list:
         return
 
