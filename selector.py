@@ -47,7 +47,7 @@ def run_batched_strategy():
 
     all_price_data = []
 
-    # 階段 1：技術面
+    # 階段 1：技術面 MAD
     print_log("📡 階段 1：技術面 MAD 篩選...")
     for sid in target_stocks:
         try:
@@ -88,7 +88,7 @@ def run_batched_strategy():
             if fin_df.empty:
                 continue
 
-            # EPS
+            # EPS 計算
             eps_df = fin_df[fin_df['type'] == 'EPS'].copy()
             eps_df['value'] = pd.to_numeric(eps_df['value'], errors='coerce')
             eps_values = eps_df['value'].dropna().values
@@ -110,7 +110,7 @@ def run_batched_strategy():
             roe_df['value'] = pd.to_numeric(roe_df['value'], errors='coerce')
             latest_roe = roe_df['value'].dropna().iloc[-1] if not roe_df['value'].dropna().empty else 0
 
-            # 門檻設定（目前中高門檻）
+            # 門檻
             if (ttm_growth >= 0.15 or current_ttm >= 2.5) and latest_roe >= 12 and current_ttm >= 1.0:
                 stats["pass"] += 1
                 df = df.copy()
@@ -129,7 +129,7 @@ def run_batched_strategy():
         print_log("⚠️ 本批次無符合標的")
         return
 
-    # 階段 3：技術指標與訊號
+    # 階段 3：技術指標 + 訊號
     full_df = pd.concat(final_data_list, ignore_index=True)
     full_df.columns = [c.lower() for c in full_df.columns]
 
@@ -140,4 +140,27 @@ def run_batched_strategy():
     latest_date = full_df['date'].max()
     today_df = full_df[full_df['date'] == latest_date].copy()
 
-    today_df['ma21_dist'] = (today_df['close'] - today_df['ma21']) / today_df['ma
+    today_df['ma21_dist'] = (today_df['close'] - today_df['ma21']) / today_df['ma21']
+
+    def get_signal(row):
+        if row['close'] >= row.get('h20_max', 0):
+            return "🔥 帶量突破"
+        if 0 <= row.get('ma21_dist', 0) <= 0.03:
+            return "🛡️ 回測支撐"
+        return "👀 趨勢向上"
+
+    today_df['signal'] = today_df.apply(get_signal, axis=1)
+
+    # 報告
+    msg = f"*📊 MAD + TTM EPS + ROE 報告 ({latest_date})*\n"
+    msg += f"分段：{start_idx}~{end_idx} | TTM≥15%或EPS≥2.5 + ROE≥12%\n---\n"
+    msg += "代號 價格 TTM_EPS 成長% ROE% 訊號\n"
+
+    for _, row in today_df.sort_values('mrat', ascending=False).iterrows():
+        msg += f"`{row['stock_id']}` {row['close']:>5.1f} {row.get('ttm_eps',0):>6.2f} {row.get('ttm_growth',0)*100:>5.1f}% {row.get('roe',0):>5.1f}% {row['signal']}\n"
+
+    send_telegram_msg(msg)
+    print_log(f"✅ 完成！找到 {len(today_df)} 檔符合標的")
+
+if __name__ == "__main__":
+    run_batched_strategy()
