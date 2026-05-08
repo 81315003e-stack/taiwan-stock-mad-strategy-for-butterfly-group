@@ -28,7 +28,7 @@ def run_batched_strategy():
     start_idx = int(raw_start) if raw_start and raw_start.strip() else 0
     end_idx = int(raw_end) if raw_end and raw_end.strip() else 200
 
-    print_log(f"🚀 MAD + TTM EPS 最終版啟動：{start_idx} ~ {end_idx}")
+    print_log(f"🚀 MAD + TTM EPS + ROA 版啟動：{start_idx} ~ {end_idx}")
 
     dl = DataLoader()
 
@@ -47,7 +47,7 @@ def run_batched_strategy():
 
     all_price_data = []
 
-    # 階段 1：技術面
+    # 階段 1：技術面 MAD
     print_log("📡 階段 1：技術面 MAD 篩選...")
     for sid in target_stocks:
         try:
@@ -73,8 +73,8 @@ def run_batched_strategy():
     if not all_price_data:
         return
 
-    # 階段 2：基本面
-    print_log(f"📡 階段 2：基本面檢查 ({len(all_price_data)} 檔)...")
+    # 階段 2：TTM EPS + ROA
+    print_log(f"📡 階段 2：TTM EPS + ROA 檢查 ({len(all_price_data)} 檔)...")
     final_data_list = []
 
     for df in all_price_data:
@@ -96,20 +96,20 @@ def run_batched_strategy():
             prev_ttm = round(eps_values[-8:-4].sum(), 3) if len(eps_values) >= 8 else 0
             ttm_growth = (current_ttm - prev_ttm) / prev_ttm if prev_ttm > 0 else 0.0
 
-            # ROE（修正抓取方式）
-            roe_mask = fin_df['type'].astype(str).str.contains('ROE|Return|權益|股東權益報酬', case=False, na=False)
-            roe_df = fin_df[roe_mask].copy()
-            roe_df['value'] = pd.to_numeric(roe_df['value'], errors='coerce')
-            latest_roe = round(roe_df['value'].dropna().iloc[-1], 2) if not roe_df['value'].dropna().empty else 0
+            # ROA（改成 ROA）
+            roa_mask = fin_df['type'].astype(str).str.contains('ROA|資產報酬率|Return on Assets', case=False, na=False)
+            roa_df = fin_df[roa_mask].copy()
+            roa_df['value'] = pd.to_numeric(roa_df['value'], errors='coerce')
+            latest_roa = round(roa_df['value'].dropna().iloc[-1], 2) if not roa_df['value'].dropna().empty else 0
 
-            # 合理門檻（可接受 TTM_EPS 較低但有成長，或 EPS 夠高）
-            if (current_ttm >= 1.5 or (current_ttm >= 0.8 and ttm_growth >= 0.10)) and latest_roe >= 5:
+            # 門檻設定（可再調整）
+            if current_ttm >= 1.2 or (current_ttm >= 0.6 and ttm_growth >= 0.12):
                 df = df.copy()
                 df['ttm_eps'] = current_ttm
                 df['ttm_growth'] = round(ttm_growth, 4)
-                df['roe'] = latest_roe
+                df['roa'] = latest_roa
                 final_data_list.append(df)
-                print_log(f"✓ 通過 {sid} | TTM_EPS={current_ttm} | 成長={ttm_growth*100:.1f}% | ROE={latest_roe}%")
+                print_log(f"✓ 通過 {sid} | TTM_EPS={current_ttm:.2f} | 成長={ttm_growth*100:.1f}% | ROA={latest_roa}%")
 
         except:
             continue
@@ -118,12 +118,14 @@ def run_batched_strategy():
     print_log(f"最終通過 {len(final_data_list)} 檔")
 
     if not final_data_list:
-        print_log("⚠️ 本批次仍無符合，請調整門檻")
+        print_log("⚠️ 本批次無符合標的")
         return
 
     # 階段 3：報告
     full_df = pd.concat(final_data_list, ignore_index=True)
     full_df.columns = [c.lower() for c in full_df.columns]
+
+    full_df['h20_max'] = full_df.groupby('stock_id')['max'].transform(lambda x: x.rolling(20).max())
 
     latest_date = full_df['date'].max()
     today_df = full_df[full_df['date'] == latest_date].copy()
@@ -139,13 +141,13 @@ def run_batched_strategy():
 
     today_df['signal'] = today_df.apply(get_signal, axis=1)
 
-    msg = f"*📊 MAD + TTM EPS 報告 ({latest_date})*\n"
+    msg = f"*📊 MAD + TTM EPS + ROA 報告 ({latest_date})*\n"
     msg += f"分段：{start_idx}~{end_idx} | 找到 {len(today_df)} 檔\n---\n"
-    msg += "代號 價格 TTM_EPS 成長% ROE% 訊號\n"
+    msg += "代號 價格 TTM_EPS 成長% ROA% 訊號\n"
 
     for _, row in today_df.sort_values('mrat', ascending=False).iterrows():
         msg += f"`{row['stock_id']}` {row['close']:>5.1f} {row.get('ttm_eps',0):>6.2f} "
-        msg += f"{row.get('ttm_growth',0)*100:>5.1f}% {row.get('roe',0):>5.1f}% {row['signal']}\n"
+        msg += f"{row.get('ttm_growth',0)*100:>5.1f}% {row.get('roa',0):>5.1f}% {row['signal']}\n"
 
     send_telegram_msg(msg)
     print_log(f"✅ 完成！找到 {len(today_df)} 檔")
