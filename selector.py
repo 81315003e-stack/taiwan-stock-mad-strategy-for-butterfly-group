@@ -28,7 +28,7 @@ def run_batched_strategy():
     start_idx = int(raw_start) if raw_start and raw_start.strip() else 0
     end_idx = int(raw_end) if raw_end and raw_end.strip() else 200
 
-    print_log(f"🚀 MAD + TTM EPS + 完整訊號版啟動：{start_idx} ~ {end_idx}")
+    print_log(f"🚀 MAD + TTM EPS 診斷寬鬆版啟動：{start_idx} ~ {end_idx}")
 
     dl = DataLoader()
 
@@ -47,13 +47,11 @@ def run_batched_strategy():
 
     all_price_data = []
 
-    # 階段 1：技術面 MAD
     print_log("📡 階段 1：技術面 MAD 篩選...")
     for sid in target_stocks:
         try:
             df = dl.taiwan_stock_daily(stock_id=sid, start_date=price_start, end_date=today)
             if df.empty or len(df) < 200: continue
-
             vol_col = next((c for c in df.columns if c.lower() in ['trading_volume', 'volume']), None)
             if not vol_col or df.iloc[-1][vol_col] < 500000: continue
 
@@ -73,7 +71,7 @@ def run_batched_strategy():
     if not all_price_data:
         return
 
-    # 階段 2：基本面 TTM EPS
+    # 階段 2：寬鬆版 + 印出實際數值
     print_log(f"📡 階段 2：TTM EPS 檢查 ({len(all_price_data)} 檔)...")
     final_data_list = []
 
@@ -95,26 +93,29 @@ def run_batched_strategy():
             prev_ttm = round(eps_values[-8:-4].sum(), 3) if len(eps_values) >= 8 else 0
             ttm_growth = (current_ttm - prev_ttm) / prev_ttm if prev_ttm > 0 else 0.0
 
-            if current_ttm >= 1.5 or (current_ttm >= 0.8 and ttm_growth >= 0.10):
+            print_log(f"[{sid}] TTM_EPS = {current_ttm:.2f} | 成長率 = {ttm_growth*100:6.1f}%")
+
+            # 目前寬鬆門檻（先讓它有輸出）
+            if current_ttm >= 0.8 or ttm_growth >= 0.05:   # 可再調整
                 df = df.copy()
                 df['ttm_eps'] = current_ttm
                 df['ttm_growth'] = round(ttm_growth, 4)
                 final_data_list.append(df)
-                print_log(f"✓ 通過 {sid} | TTM_EPS={current_ttm:.2f} | 成長={ttm_growth*100:.1f}%")
 
         except:
             continue
         time.sleep(0.07)
 
     print_log(f"最終通過 {len(final_data_list)} 檔")
+
     if not final_data_list:
+        print_log("⚠️ 仍無通過")
         return
 
-    # 階段 3：完整技術指標 + 訊號（含蓄勢待發）
+    # 報告部分（含蓄勢待發）
     full_df = pd.concat(final_data_list, ignore_index=True)
     full_df.columns = [c.lower() for c in full_df.columns]
 
-    # 技術指標
     full_df['h20_max'] = full_df.groupby('stock_id')['max'].transform(lambda x: x.rolling(20).max())
     full_df['daily_amp'] = full_df['max'] - full_df['min']
     full_df['amp5_max'] = full_df.groupby('stock_id')['daily_amp'].transform(lambda x: x.rolling(5).max())
@@ -130,13 +131,12 @@ def run_batched_strategy():
             return "🔥 帶量突破"
         if 0 <= row.get('ma21_dist', 0) <= 0.03:
             return "🛡️ 回測支撐"
-        if row.get('amp5_max', 0) < row.get('amp6_15_max', 999):   # 振幅收斂 = 蓄勢
+        if row.get('amp5_max', 0) < row.get('amp6_15_max', 999):
             return "⌛ 蓄勢待發"
         return "👀 趨勢向上"
 
     today_df['signal'] = today_df.apply(get_signal, axis=1)
 
-    # Telegram 報告
     msg = f"*📊 MAD + TTM EPS 報告 ({latest_date})*\n"
     msg += f"分段：{start_idx}~{end_idx} | 找到 {len(today_df)} 檔\n---\n"
     msg += "代號 價格 TTM_EPS 成長% 訊號\n"
