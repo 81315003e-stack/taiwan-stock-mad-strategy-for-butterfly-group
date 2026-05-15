@@ -38,7 +38,8 @@ def run_batched_strategy():
     print_log(f"🚀 MAD + TTM EPS 穩定版啟動：{start_idx} ~ {end_idx}")
 
     dl = DataLoader()
-
+    dl.login_by_token(api_token=os.getenv('FINMIND_API_TOKEN'))  # ← 加這行
+    
     try:
         stock_info = dl.taiwan_stock_info()
         full_list = stock_info[stock_info['stock_id'].str.match(r'^\d{4}$')]['stock_id'].unique().tolist()
