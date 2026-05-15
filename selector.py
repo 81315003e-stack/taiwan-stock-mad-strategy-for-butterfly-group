@@ -185,5 +185,5 @@ def run_batched_strategy():
     send_telegram_msg(msg)
     print_log(f"✅ 完成！找到 {len(today_df)} 檔")
 
-    if __name__ == "__main__":
-        run_batched_strategy()
+if __name__ == "__main__":
+    run_batched_strategy()
