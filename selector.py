@@ -84,31 +84,57 @@ def run_batched_strategy():
     final_data_list = []
 
     for df in all_price_data:
-        sid = df['stock_id'].iloc[0]
-        try:
-            fin_df = dl.taiwan_stock_financial_statement(stock_id=sid, start_date=fin_start)
-            if fin_df.empty: continue
-
-            eps_mask = fin_df['type'].astype(str).str.contains('EPS|盈餘|每股', case=False, na=False)
-            eps_df = fin_df[eps_mask].copy()
-            if eps_df.empty: continue
-
-            eps_df['value'] = pd.to_numeric(eps_df['value'], errors='coerce')
-            eps_values = eps_df['value'].dropna().values
-            if len(eps_values) < 4: continue
-
-            current_ttm = round(eps_values[-4:].sum(), 3)
-            prev_ttm = round(eps_values[-8:-4].sum(), 3) if len(eps_values) >= 8 else 0
-            ttm_growth = (current_ttm - prev_ttm) / prev_ttm if prev_ttm > 0 else 0.0
-
-            if current_ttm >= 0.2 or (current_ttm >= 0.2 and ttm_growth >= 0.01):
-                df = df.copy()
-                df['ttm_eps'] = current_ttm
-                df['ttm_growth'] = round(ttm_growth, 4)
-                final_data_list.append(df)
-        except:
+    sid = df['stock_id'].iloc[0]
+    try:
+        fin_df = dl.taiwan_stock_financial_statement(stock_id=sid, start_date=fin_start)
+        if fin_df.empty:
             continue
-        time.sleep(0.07)
+
+        # 修正：拓寬關鍵字，避免欄位撈不到
+        eps_mask = fin_df['type'].astype(str).str.contains(
+            'EPS|每股盈餘|每股|基本每股|稀釋每股', case=False, na=False
+        )
+        eps_df = fin_df[eps_mask].copy()
+
+        if eps_df.empty:
+            # 如果完全找不到，改用 net_income 估算（fallback）
+            # 或直接 skip，但先 log 出來
+            print_log(f"  SKIP {sid}: 無 EPS 欄位，type 有: {fin_df['type'].unique()[:5]}")
+            continue
+
+        # 修正：確保按日期由舊到新排序
+        eps_df['date'] = pd.to_datetime(eps_df['date'], errors='coerce')
+        eps_df = eps_df.sort_values('date', ascending=True)
+
+        eps_df['value'] = pd.to_numeric(eps_df['value'], errors='coerce')
+        eps_values = eps_df['value'].dropna().values
+
+        if len(eps_values) < 4:
+            continue
+
+        current_ttm = round(eps_values[-4:].sum(), 3)
+        prev_ttm = round(eps_values[-8:-4].sum(), 3) if len(eps_values) >= 8 else None
+
+        # 修正：門檻邏輯改為真正有效的成長條件
+        if current_ttm < 0.2:
+            continue
+        if prev_ttm is not None and prev_ttm > 0:
+            ttm_growth = (current_ttm - prev_ttm) / prev_ttm
+        else:
+            ttm_growth = 0.0
+
+        # 放寬：只要 EPS 正且 TTM 成長 >= 0（即不衰退）就通過
+        # 你原本想要的嚴格版是 ttm_growth >= 0.01，可視情況調整
+        if current_ttm >= 0.2 and ttm_growth >= 0.0:
+            df = df.copy()
+            df['ttm_eps'] = current_ttm
+            df['ttm_growth'] = round(ttm_growth, 4)
+            final_data_list.append(df)
+
+    except Exception as e:
+        print_log(f"  ERR {sid}: {e}")
+        continue
+    time.sleep(0.07)
 
     print_log(f"基本面通過 {len(final_data_list)} 檔")
     if not final_data_list:
