@@ -101,7 +101,7 @@ def run_batched_strategy():
             prev_ttm = round(eps_values[-8:-4].sum(), 3) if len(eps_values) >= 8 else 0
             ttm_growth = (current_ttm - prev_ttm) / prev_ttm if prev_ttm > 0 else 0.0
 
-            if current_ttm >= 0.8 or (current_ttm >= 0.6 and ttm_growth >= 0.01):
+            if current_ttm >= 0.2 or (current_ttm >= 0.2 and ttm_growth >= 0.01):
                 df = df.copy()
                 df['ttm_eps'] = current_ttm
                 df['ttm_growth'] = round(ttm_growth, 4)
