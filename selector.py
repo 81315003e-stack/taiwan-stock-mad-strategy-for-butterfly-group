@@ -142,7 +142,10 @@ def run_batched_strategy():
     full_df = pd.concat(final_data_list, ignore_index=True)
     full_df.columns = [c.lower() for c in full_df.columns]
     print_log(f"DEBUG full_df columns: {list(full_df.columns)}")
-    
+
+    full_df['date'] = pd.to_datetime(full_df['date'])        # ← 確保日期格式
+    full_df = full_df.sort_values('date')                    # ← 確保排序正確
+
     full_df['h20_max'] = full_df.groupby('stock_id')['max'].transform(lambda x: x.rolling(20).max())
     full_df['daily_amp'] = full_df['max'] - full_df['min']
     full_df['amp5_max'] = full_df.groupby('stock_id')['daily_amp'].transform(lambda x: x.rolling(5).max())
@@ -150,10 +153,11 @@ def run_batched_strategy():
 
     latest_date = full_df['date'].max()
     today_df = full_df[full_df['date'] == latest_date].copy()
+    print_log(f"DEBUG latest_date={latest_date}, today_df={len(today_df)} 檔")  # ← debug 在這裡
 
     if today_df.empty:
-        print_log("⚠️ today_df 為空，無法產生報告")
-        return
+        print_log("⚠️ today_df 為空，無法產生報告")   # ← 縮排 8 格
+        return                                         # ← 縮排 8 格
 
     today_df['ma21_dist'] = (today_df['close'] - today_df['ma21']) / today_df['ma21']
 
@@ -168,5 +172,15 @@ def run_batched_strategy():
 
     today_df['signal'] = today_df.apply(get_signal, axis=1)
 
-if __name__ == "__main__":
-    run_batched_strategy()
+    # 發送 Telegram
+    msg = f"*📊 MAD + TTM EPS 報告 ({latest_date})*\n"
+    msg += f"分段：{start_idx}~{end_idx} | 找到 {len(today_df)} 檔\n---\n"
+    msg += "代號 價格 TTM_EPS 成長% 訊號\n"
+
+    for _, row in today_df.sort_values('mrat', ascending=False).iterrows():
+        msg += f"`{row['stock_id']}` {row['close']:>5.1f} {row.get('ttm_eps', 0):>6.2f} "
+        msg += f"{row.get('ttm_growth', 0) * 100:>5.1f}% {row['signal']}\n"
+
+    print_log(f"準備發送 Telegram 訊息，長度: {len(msg)} 字元")
+    send_telegram_msg(msg)
+    print_log(f"✅ 完成！找到 {len(today_df)} 檔")
