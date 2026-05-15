@@ -141,7 +141,8 @@ def run_batched_strategy():
     # ── 階段 3：報告 ─────────────────────────────────────────────────
     full_df = pd.concat(final_data_list, ignore_index=True)
     full_df.columns = [c.lower() for c in full_df.columns]
-
+    print_log(f"DEBUG full_df columns: {list(full_df.columns)}")
+    
     full_df['h20_max'] = full_df.groupby('stock_id')['max'].transform(lambda x: x.rolling(20).max())
     full_df['daily_amp'] = full_df['max'] - full_df['min']
     full_df['amp5_max'] = full_df.groupby('stock_id')['daily_amp'].transform(lambda x: x.rolling(5).max())
