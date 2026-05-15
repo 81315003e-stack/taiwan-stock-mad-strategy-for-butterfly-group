@@ -59,10 +59,9 @@ jobs:
           
       - name: 3. 執行策略並發送通知
         env:
-          FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
+          FINMIND_API_TOKEN: ${{ secrets.FINMIND_TOKEN }}   # ← 改成 FINMIND_API_TOKEN
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          # 將判定好的分段傳入 Python
           SLICE_START: ${{ steps.set_slice.outputs.START }}
           SLICE_END: ${{ steps.set_slice.outputs.END }}
         run: |
