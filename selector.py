@@ -3,12 +3,15 @@ import datetime
 import time
 import requests
 import pandas as pd
+import numpy as np
 from FinMind.data import DataLoader
 import sys
+
 
 def print_log(msg):
     print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] {msg}")
     sys.stdout.flush()
+
 
 def send_telegram_msg(message):
     token = os.getenv('TELEGRAM_BOT_TOKEN')
@@ -18,7 +21,7 @@ def send_telegram_msg(message):
         return
 
     url = f"https://api.telegram.org/bot{token}/sendMessage"
-    payload = {"chat_id": chat_id, "text": message} #, "parse_mode": "Markdown"}
+    payload = {"chat_id": chat_id, "text": message}
 
     try:
         r = requests.post(url, data=payload, timeout=10)
@@ -29,6 +32,7 @@ def send_telegram_msg(message):
     except Exception as e:
         print_log(f"❌ Telegram 例外錯誤: {e}")
 
+
 def run_batched_strategy():
     raw_start = os.getenv('SLICE_START')
     raw_end = os.getenv('SLICE_END')
@@ -38,8 +42,8 @@ def run_batched_strategy():
     print_log(f"🚀 MAD + TTM EPS 穩定版啟動：{start_idx} ~ {end_idx}")
 
     dl = DataLoader()
-    dl.login_by_token(api_token=os.getenv('FINMIND_API_TOKEN'))  # ← 加這行
-    
+    dl.login_by_token(api_token=os.getenv('FINMIND_API_TOKEN'))
+
     try:
         stock_info = dl.taiwan_stock_info()
         full_list = stock_info[stock_info['stock_id'].str.match(r'^\d{4}$')]['stock_id'].unique().tolist()
@@ -75,7 +79,8 @@ def run_batched_strategy():
                 df = df.copy()
                 df['stock_id'] = sid
                 all_price_data.append(df)
-        except:
+        except Exception as e:
+            print_log(f"  ERR 價格 {sid}: {e}")
             continue
         time.sleep(0.012)
 
@@ -122,6 +127,7 @@ def run_batched_strategy():
             else:
                 ttm_growth = 0.0
 
+            # 嚴格基本面條件
             if current_ttm >= 1.0 and ttm_growth >= 0.10:
                 df = df.copy()
                 df['ttm_eps'] = current_ttm
@@ -129,7 +135,7 @@ def run_batched_strategy():
                 final_data_list.append(df)
 
         except Exception as e:
-            print_log(f"  ERR {sid}: {e}")
+            print_log(f"  ERR 財報 {sid}: {e}")
             continue
         time.sleep(0.07)
 
@@ -143,8 +149,8 @@ def run_batched_strategy():
     full_df.columns = [c.lower() for c in full_df.columns]
     print_log(f"DEBUG full_df columns: {list(full_df.columns)}")
 
-    full_df['date'] = pd.to_datetime(full_df['date'])        # ← 確保日期格式
-    full_df = full_df.sort_values('date')                    # ← 確保排序正確
+    full_df['date'] = pd.to_datetime(full_df['date'])
+    full_df = full_df.sort_values('date')
 
     full_df['h20_max'] = full_df.groupby('stock_id')['max'].transform(lambda x: x.rolling(20).max())
     full_df['daily_amp'] = full_df['max'] - full_df['min']
@@ -153,13 +159,24 @@ def run_batched_strategy():
 
     latest_date = full_df['date'].max()
     today_df = full_df[full_df['date'] == latest_date].copy()
-    print_log(f"DEBUG latest_date={latest_date}, today_df={len(today_df)} 檔")  # ← debug 在這裡
+    print_log(f"DEBUG latest_date={latest_date}, today_df={len(today_df)} 檔")
 
     if today_df.empty:
-        print_log("⚠️ today_df 為空，無法產生報告")   # ← 縮排 8 格
-        return                                         # ← 縮排 8 格
+        print_log("⚠️ today_df 為空，無法產生報告")
+        return
 
+    # 技術與風險欄位
     today_df['ma21_dist'] = (today_df['close'] - today_df['ma21']) / today_df['ma21']
+    today_df['ma200_dist'] = (today_df['close'] - today_df['ma200']) / today_df['ma200']
+
+    today_df['stop_price'] = today_df['ma21'] * 0.97
+    today_df['target_price'] = today_df['h20_max'] * 1.05
+
+    denom = today_df['close'] - today_df['stop_price']
+    today_df['rr_ratio'] = np.where(denom > 0, (today_df['target_price'] - today_df['close']) / denom, np.nan)
+
+    today_df['entry_low'] = today_df['ma21'] * 0.99
+    today_df['entry_high'] = today_df['ma21'] * 1.02
 
     def get_signal(row):
         if row['close'] >= row.get('h20_max', 0):
@@ -170,20 +187,50 @@ def run_batched_strategy():
             return "⌛ 蓄勢待發"
         return "👀 趨勢向上"
 
+    def get_comment(row):
+        good_fund = row.get('ttm_eps', 0) >= 5 and row.get('ttm_growth', 0) >= 0.30
+        dist = row.get('ma21_dist', 0)
+        rr = row.get('rr_ratio', np.nan)
+
+        hot = dist > 0.08
+        near_support = 0 <= dist <= 0.03
+        below_ma21 = dist < 0
+
+        if good_fund and near_support:
+            return "📌 多頭關注：基本面佳，靠近 MA21，可考慮分批佈局"
+        if good_fund and hot:
+            return "⚠️ 基本面佳但價位偏熱，建議等待拉回接近 MA21 再進場"
+        if below_ma21:
+            return "⚠️ 價格跌破 MA21，短線結構轉弱，偏向觀望或減碼"
+        if not np.isnan(rr) and rr < 1.0:
+            return "⚠️ 風險報酬不佳（RR<1），不建議追價"
+        return "👀 結構多頭，但需搭配風險承受度評估進場時機"
+
     today_df['signal'] = today_df.apply(get_signal, axis=1)
+    today_df['comment'] = today_df.apply(get_comment, axis=1)
 
     # 發送 Telegram
-    msg = f"*📊 MAD + TTM EPS 報告 ({latest_date})*\n"
-    msg += f"分段：{start_idx}~{end_idx} | 找到 {len(today_df)} 檔\n---\n"
-    msg += "代號 價格 TTM_EPS 成長% 訊號\n"
+    msg = f"📊 MAD + TTM EPS 報告 ({latest_date.date()})
+"
+    msg += f"分段：{start_idx}~{end_idx} | 找到 {len(today_df)} 檔
+---
+"
+    msg += "代號 價格 TTM_EPS 成長% 入場區間 RR 訊號 說明
+"
 
     for _, row in today_df.sort_values('mrat', ascending=False).iterrows():
-        msg += f"`{row['stock_id']}` {row['close']:>5.1f} {row.get('ttm_eps', 0):>6.2f} "
-        msg += f"{row.get('ttm_growth', 0) * 100:>5.1f}% {row['signal']}\n"
+        msg += (
+            f"{row['stock_id']:>6} {row['close']:>7.1f} "
+            f"{row.get('ttm_eps', 0):>7.2f} {row.get('ttm_growth', 0) * 100:>6.1f}% "
+            f"[{row['entry_low']:.1f}-{row['entry_high']:.1f}] "
+            f"RR={row['rr_ratio']:.1f} {row['signal']} {row['comment']}
+"
+        )
 
     print_log(f"準備發送 Telegram 訊息，長度: {len(msg)} 字元")
     send_telegram_msg(msg)
     print_log(f"✅ 完成！找到 {len(today_df)} 檔")
+
 
 if __name__ == "__main__":
     run_batched_strategy()
