@@ -184,3 +184,6 @@ def run_batched_strategy():
     print_log(f"準備發送 Telegram 訊息，長度: {len(msg)} 字元")
     send_telegram_msg(msg)
     print_log(f"✅ 完成！找到 {len(today_df)} 檔")
+
+    if __name__ == "__main__":
+    run_batched_strategy()
