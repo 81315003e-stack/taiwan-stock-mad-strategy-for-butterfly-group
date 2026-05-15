@@ -64,14 +64,14 @@ def run_batched_strategy():
                 continue
 
             vol_col = next((c for c in df.columns if c.lower() in ['trading_volume', 'volume']), None)
-            if not vol_col or df.iloc[-1][vol_col] < 500000:
+            if not vol_col or df.iloc[-1][vol_col] < 1000000:
                 continue
 
             df['ma21'] = df['close'].rolling(21).mean()
             df['ma200'] = df['close'].rolling(200).mean()
             df['mrat'] = df['ma21'] / df['ma200']
 
-            if df['mrat'].iloc[-1] > 1.0:
+            if df['mrat'].iloc[-1] > 1.05:
                 df = df.copy()
                 df['stock_id'] = sid
                 all_price_data.append(df)
@@ -122,7 +122,7 @@ def run_batched_strategy():
             else:
                 ttm_growth = 0.0
 
-            if current_ttm >= 0.1 and ttm_growth >= 0.0:
+            if current_ttm >= 1.0 and ttm_growth >= 0.10:
                 df = df.copy()
                 df['ttm_eps'] = current_ttm
                 df['ttm_growth'] = round(ttm_growth, 4)
