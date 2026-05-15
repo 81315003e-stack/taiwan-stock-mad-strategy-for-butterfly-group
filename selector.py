@@ -83,13 +83,15 @@ def run_batched_strategy():
     print_log(f"📡 階段 2：TTM EPS 檢查 ({len(all_price_data)} 檔)...")
     final_data_list = []
 
-    for df in all_price_data:
-    sid = df['stock_id'].iloc[0]
+    print_log(f"📡 階段 2：TTM EPS 檢查 ({len(all_price_data)} 檔)...")
+final_data_list = []
+
+for df in all_price_data:
+    sid = df['stock_id'].iloc[0]          # ← 加 4 個空格
     try:
         fin_df = dl.taiwan_stock_financial_statement(stock_id=sid, start_date=fin_start)
         if fin_df.empty:
             continue
-
         # 修正：拓寬關鍵字，避免欄位撈不到
         eps_mask = fin_df['type'].astype(str).str.contains(
             'EPS|每股盈餘|每股|基本每股|稀釋每股', case=False, na=False
@@ -125,7 +127,7 @@ def run_batched_strategy():
 
         # 放寬：只要 EPS 正且 TTM 成長 >= 0（即不衰退）就通過
         # 你原本想要的嚴格版是 ttm_growth >= 0.01，可視情況調整
-        if current_ttm >= 0.2 and ttm_growth >= 0.0:
+        if current_ttm >= 0.1 and ttm_growth >= 0.0:
             df = df.copy()
             df['ttm_eps'] = current_ttm
             df['ttm_growth'] = round(ttm_growth, 4)
