@@ -186,4 +186,4 @@ def run_batched_strategy():
     print_log(f"✅ 完成！找到 {len(today_df)} 檔")
 
     if __name__ == "__main__":
-    run_batched_strategy()
+        run_batched_strategy()
