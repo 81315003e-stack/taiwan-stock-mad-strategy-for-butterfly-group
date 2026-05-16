@@ -211,24 +211,28 @@ def run_batched_strategy():
 
     # 發送 Telegram
     date_str = str(latest_date.date())
-    msg = "=== MAD + TTM EPS " + date_str + " ===\n"
-    msg += f"分段：{start_idx}~{end_idx} | 找到 {len(today_df)} 檔\n---\n"
+    range_str = str(start_idx) + "~" + str(end_idx)
+    count_str = str(len(today_df))
+
+    msg = "=== MAD TTM EPS " + date_str + " ===\n"
+    msg += "分段：" + range_str + " | 找到 " + count_str + " 檔\n"
+    msg += "---\n"
     msg += "代號 價格 TTM_EPS 成長% 入場區間 RR 訊號 說明\n"
-"
-    msg += f"分段：{start_idx}~{end_idx} | 找到 {len(today_df)} 檔
----
-"
-    msg += "代號 價格 TTM_EPS 成長% 入場區間 RR 訊號 說明
-"
 
     for _, row in today_df.sort_values('mrat', ascending=False).iterrows():
-        msg += (
-            f"{row['stock_id']:>6} {row['close']:>7.1f} "
-            f"{row.get('ttm_eps', 0):>7.2f} {row.get('ttm_growth', 0) * 100:>6.1f}% "
-            f"[{row['entry_low']:.1f}-{row['entry_high']:.1f}] "
-            f"RR={row['rr_ratio']:.1f} {row['signal']} {row['comment']}
-"
-        )
+        sid = str(row['stock_id'])
+        close = str(round(row['close'], 1))
+        eps = str(round(row.get('ttm_eps', 0), 2))
+        growth = str(round(row.get('ttm_growth', 0) * 100, 1))
+        elow = str(round(row['entry_low'], 1))
+        ehigh = str(round(row['entry_high'], 1))
+        rr_val = row['rr_ratio']
+        rr = str(round(rr_val, 1)) if not pd.isna(rr_val) else "N/A"
+        signal = str(row['signal'])
+        comment = str(row['comment'])
+        msg += sid + " " + close + " " + eps + " " + growth + "% "
+        msg += "[" + elow + "-" + ehigh + "] RR=" + rr + " "
+        msg += signal + " " + comment + "\n"
 
     print_log(f"準備發送 Telegram 訊息，長度: {len(msg)} 字元")
     send_telegram_msg(msg)
