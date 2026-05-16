@@ -210,7 +210,10 @@ def run_batched_strategy():
     today_df['comment'] = today_df.apply(get_comment, axis=1)
 
     # 發送 Telegram
-    msg = f"📊 MAD + TTM EPS 報告 ({latest_date.date()})
+    date_str = str(latest_date.date())
+    msg = "=== MAD + TTM EPS " + date_str + " ===\n"
+    msg += f"分段：{start_idx}~{end_idx} | 找到 {len(today_df)} 檔\n---\n"
+    msg += "代號 價格 TTM_EPS 成長% 入場區間 RR 訊號 說明\n"
 "
     msg += f"分段：{start_idx}~{end_idx} | 找到 {len(today_df)} 檔
 ---
